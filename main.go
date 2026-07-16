@@ -1,7 +1,5 @@
 package main
 
-package main
-
 import (
 	"database/sql"
 	"encoding/json"
