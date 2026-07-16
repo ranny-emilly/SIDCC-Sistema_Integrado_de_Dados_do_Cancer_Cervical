@@ -7,15 +7,14 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"os" // Adicionado para ler as variáveis do Render
+	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
-	"golang.org/x/crypto/bcrypt"
+	_ "://github.com"
 )
+
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
