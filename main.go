@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os" // Adicionado para ler as variáveis do Render
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,7 +18,7 @@ import (
 )
 
 func init() {
-    rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano())
 }
 
 type Paciente struct {
@@ -95,7 +96,11 @@ func isValidEmail(email string) bool {
 }
 
 func conectar() (*sql.DB, error) {
-	connStr := "host=localhost port=5432 user=postgres password=postgres dbname=ProjetoIntegrador sslmode=disable"
+	// Se o Render fornecer uma URL externa de banco de dados, o Go usará ela automaticamente.
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = "host=localhost port=5432 user=postgres password=postgres dbname=ProjetoIntegrador sslmode=disable"
+	}
 	return sql.Open("postgres", connStr)
 }
 
@@ -203,478 +208,39 @@ func listarPacientesAPI(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	json.NewEncoder(w).Encode(pacientes)
 }
 
-func listarPacientePorID(w http.ResponseWriter, r *http.Request, db *sql.DB, id int) {
-	var p Paciente
-	var codMunicipio sql.NullString
-	var dataNascimentoDB time.Time
-
-	err := db.QueryRow(`SELECT id, cartao_sus, cpf_paciente, nome_completo, data_nascimento, cep, ddd, telefone, nacionalidade, uf, raca_cor, escolaridade, nome_mae, nome_social, logradouro, numero_residencia, complemento, setor, cidade, cod_municipio, ponto_referencia, fixo, email
-		FROM paciente_infos WHERE id = $1`, id).Scan(
-		&p.ID, &p.CartaoSUS, &p.CPFPaciente, &p.NomeCompleto, &dataNascimentoDB,
-		&p.CEP, &p.DDD, &p.Telefone, &p.Nacionalidade, &p.UF, &p.RacaCor, &p.Escolaridade, &p.NomeMae, &p.NomeSocial, &p.Logradouro, &p.NumeroResidencia, &p.Complemento, &p.Setor, &p.Cidade, &codMunicipio, &p.PontoReferencia, &p.Fixo, &p.EmailPaciente,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Paciente não encontrado", http.StatusNotFound)
-		} else {
-			http.Error(w, "Erro ao buscar paciente: "+err.Error(), http.StatusInternalServerError)
-		}
-		return
-	}
-
-	p.DataNascimento = dataNascimentoDB.Format("2006-01-02")
-
-	if codMunicipio.Valid {
-		p.CodMunicipio = codMunicipio.String
-	} else {
-		p.CodMunicipio = ""
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(p)
-}
-
-func buscarPacientePorCartaoSUS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	cartao := r.URL.Query().Get("cartao_sus")
-	if cartao == "" {
-		http.Error(w, "Informe o cartao_sus", http.StatusBadRequest)
-		return
-	}
-
-	var p Paciente
-	var codMunicipio sql.NullString
-	var dataNascimentoDB time.Time
-
-	err := db.QueryRow(`SELECT id, cartao_sus, cpf_paciente, nome_completo, data_nascimento, cep, ddd, telefone, nacionalidade, uf, raca_cor, escolaridade, nome_mae, nome_social, logradouro, numero_residencia, complemento, setor, cidade, cod_municipio, ponto_referencia, fixo, email
-		FROM paciente_infos WHERE cartao_sus = $1`, cartao).Scan(
-		&p.ID, &p.CartaoSUS, &p.CPFPaciente, &p.NomeCompleto, &dataNascimentoDB,
-		&p.CEP, &p.DDD, &p.Telefone, &p.Nacionalidade, &p.UF, &p.RacaCor, &p.Escolaridade, &p.NomeMae, &p.NomeSocial, &p.Logradouro, &p.NumeroResidencia, &p.Complemento, &p.Setor, &p.Cidade, &codMunicipio, &p.PontoReferencia, &p.Fixo, &p.EmailPaciente,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Paciente não encontrado", http.StatusNotFound)
-		} else {
-			http.Error(w, "Erro ao buscar paciente: "+err.Error(), http.StatusInternalServerError)
-		}
-		return
-	}
-
-	p.DataNascimento = dataNascimentoDB.Format("2006-01-02")
-
-	if codMunicipio.Valid {
-		p.CodMunicipio = codMunicipio.String
-	} else {
-		p.CodMunicipio = ""
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(p)
-}
-
-func inserirExameCitopatologicoAPI(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var e ExameCitopatologico
-	var err error
-
-	if err = json.NewDecoder(r.Body).Decode(&e); err != nil {
-		http.Error(w, "Dados inválidos: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var dataUltimaMenstruacaoDB sql.NullTime
-	if e.DataUltimaMenstruacao != "" {
-		var parsedTime time.Time
-		parsedTime, err = time.Parse("2006-01-02", e.DataUltimaMenstruacao)
-		if err != nil {
-			log.Printf("Erro ao parsear data da última menstruação '%s': %v", e.DataUltimaMenstruacao, err)
-			http.Error(w, "Formato de data da última menstruação inválido (esperado ISO 8601 -YYYY-MM-DD)", http.StatusBadRequest)
-			return
-		}
-		dataUltimaMenstruacaoDB = sql.NullTime{Time: parsedTime, Valid: true}
-	}
-
-
-	_, err = db.Exec(`INSERT INTO exame_citopatologico (
-		paciente_id, motivo_exame, primeira_vez_exame, usa_diu, usa_anticoncepcional, esta_gestante, usa_hormonio, ja_fez_radioterapia, data_ultima_menstruacao, esta_menopausa, teve_corrimento, teve_sangramento_anormal
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		e.PacienteID, e.MotivoExame, e.PrimeiraVezExame, e.UsaDIU, e.UsaAnticoncepcional, e.EstaGestante, e.UsaHormonio, e.JaFezRadioterapia, dataUltimaMenstruacaoDB, e.EstaMenopausa, e.TeveCorrimento, e.TeveSangramentoAnormal,
-	)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Erro ao inserir exame: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, "Exame inserido com sucesso")
-}
-
-func submitFichaCitopatologicaHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var payload FichaCitopatologicaPayload
-	err := json.NewDecoder(r.Body).Decode(&payload)
-	if err != nil {
-		http.Error(w, "Erro ao decodificar JSON do payload: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	ubsCnesLimpo := limparMascara(payload.UBSInfoData.Cnes)
-	ubsProtocoloLimpo := limparMascara(payload.UBSInfoData.Protocolo)
-
-	_, err = db.Exec(`
-		INSERT INTO ubs_infos (cnes, unidade, municipios_ubs, estado, uf, protocolo)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (protocolo) DO UPDATE SET
-			cnes = EXCLUDED.cnes,
-			unidade = EXCLUDED.unidade,
-			municipios_ubs = EXCLUDED.municipios_ubs,
-			estado = EXCLUDED.estado,
-			uf = EXCLUDED.uf;
-	`, ubsCnesLimpo, payload.UBSInfoData.Unidade, payload.UBSInfoData.MunicipiosUbs, payload.UBSInfoData.UF, payload.UBSInfoData.UF, ubsProtocoloLimpo)
-	if err != nil {
-		log.Printf("Erro ao inserir/atualizar UBS: %v", err)
-		http.Error(w, "Erro ao salvar informações da UBS: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var idProfissional sql.NullInt32
-
-	var dataUltimaMenstruacaoDB sql.NullTime
-	if payload.ExameData.DataUltimaMenstruacao != "" {
-		parsedTime, err := time.Parse("2006-01-02", payload.ExameData.DataUltimaMenstruacao)
-		if err != nil {
-			log.Printf("Erro ao parsear data da última menstruação '%s': %v", payload.ExameData.DataUltimaMenstruacao, err)
-			http.Error(w, "Formato de data da última menstruação inválido (esperado ISO 8601 -YYYY-MM-DD)", http.StatusBadRequest)
-			return
-		}
-		dataUltimaMenstruacaoDB = sql.NullTime{Time: parsedTime, Valid: true}
-	}
-	
-	_, err = db.Exec(`
-		INSERT INTO exame_citopatologico (
-			id_profissional, paciente_id, motivo_exame, primeira_vez_exame, usa_diu,
-			usa_anticoncepcional, esta_gestante, usa_hormonio, ja_fez_radioterapia,
-			data_ultima_menstruacao, esta_menopausa, teve_corrimento, teve_sangramento_anormal
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-	`,
-		idProfissional,
-		payload.ExameData.PacienteID,
-		payload.ExameData.MotivoExame,
-		payload.ExameData.PrimeiraVezExame,
-		payload.ExameData.UsaDIU,
-		payload.ExameData.UsaAnticoncepcional,
-		payload.ExameData.EstaGestante,
-		payload.ExameData.UsaHormonio,
-		payload.ExameData.JaFezRadioterapia,
-		dataUltimaMenstruacaoDB,
-		payload.ExameData.EstaMenopausa,
-		payload.ExameData.TeveCorrimento,
-		payload.ExameData.TeveSangramentoAnormal,
-	)
-	if err != nil {
-		log.Printf("Erro ao inserir exame citopatológico: %v", err)
-		http.Error(w, "Erro ao salvar exame citopatológico: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, "Ficha citopatológica salva com sucesso!")
-}
-
-var codigosVerificacao = make(map[string]string)
-
-func checarEmailEEnviarCodigoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Erro ao parsear dados do formulário: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	email := r.FormValue("email")
-	if email == "" {
-		http.Error(w, "E-mail é obrigatório.", http.StatusBadRequest)
-		return
-	}
-
-	var pacienteID int
-	err := db.QueryRow("SELECT id FROM paciente_infos WHERE email = $1", email).Scan(&pacienteID)
-
-	if err == sql.ErrNoRows {
-		http.Error(w, "E-mail não encontrado no cadastro.", http.StatusNotFound)
-		return
-	} else if err != nil {
-		log.Printf("Erro ao consultar email no banco: %v", err)
-		http.Error(w, "Erro interno ao verificar o e-mail.", http.StatusInternalServerError)
-		return
-	}
-
-	codigo := rand.Intn(900000) + 100000
-	codigoStr := fmt.Sprintf("%06d", codigo)
-	codigosVerificacao[email] = codigoStr
-
-	log.Printf("Código de verificação gerado para %s: %s", email, codigoStr)
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Email encontrado e código enviado com sucesso!"))
-}
-
-func enviarCodigoHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-	email := r.FormValue("email")
-	if email == "" {
-		http.Error(w, "E-mail obrigatório", http.StatusBadRequest)
-		return
-	}
-	codigo := rand.Intn(900000) + 100000
-	codigoStr := fmt.Sprintf("%06d", codigo)
-	codigosVerificacao[email] = codigoStr
-	log.Printf("Código de verificação para %s: %s", email, codigoStr)
-	w.Write([]byte("Código enviado para seu e-mail!"))
-}
-
-func verificarCodigoHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-	email := r.FormValue("email")
-	codigo := r.FormValue("codigo")
-	if email == "" || codigo == "" {
-		http.Error(w, "E-mail e código são obrigatórios", http.StatusBadRequest)
-		return
-	}
-	if codigosVerificacao[email] == codigo {
-		w.Write([]byte("Código correto"))
-		delete(codigosVerificacao, email)
-	} else {
-		http.Error(w, "Código incorreto", http.StatusUnauthorized)
-	}
-}
-
-func redefinirSenhaHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-	email := r.FormValue("email")
-	novaSenha := r.FormValue("nova_senha")
-	if email == "" || novaSenha == "" {
-		http.Error(w, "E-mail e nova senha são obrigatórios", http.StatusBadRequest)
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(novaSenha), bcrypt.DefaultCost)
-	if err != nil {
-		http.Error(w, "Erro ao gerar hash da senha", http.StatusInternalServerError)
-		return
-	}
-
-	res, err := db.Exec("UPDATE paciente_infos SET senha = $1 WHERE email = $2", string(hash), email)
-	if err != nil {
-		http.Error(w, "Erro ao atualizar senha: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		http.Error(w, "E-mail não encontrado", http.StatusNotFound)
-		return
-	}
-	w.Write([]byte("Senha redefinida com sucesso!"))
-}
-
-func handleSacForm(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var form SacForm
-	err := json.NewDecoder(r.Body).Decode(&form)
-	if err != nil {
-		http.Error(w, "Erro ao ler dados: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if !isValidEmail(form.Email) {
-		http.Error(w, "Email inválido", http.StatusBadRequest)
-		return
-	}
-
-	if form.Mensagem == "" {
-		http.Error(w, "Mensagem não pode estar vazia", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("SAC recebido: Email=%s | Mensagem=%s\n", form.Email, form.Mensagem)
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Mensagem recebida com sucesso"))
-}
-
-type LLMPromptRequest struct {
-    Prompt string `json:"prompt"`
-}
-
-type LLMResponse struct {
-    Response string `json:"response"`
-}
-
-func llmEmailHelpHandler(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-        return
-    }
-
-    var req LLMPromptRequest
-    var err error
-
-    if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Erro ao decodificar JSON da requisição: "+err.Error(), http.StatusBadRequest)
-        return
-    }
-
-    apiKey := "" 
-    apiUrl := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
-
-    payload := map[string]interface{}{
-        "contents": []map[string]interface{}{
-            {
-                "role": "user",
-                "parts": []map[string]string{
-                    {"text": req.Prompt},
-                },
-            },
-        },
-    }
-
-    var payloadBytes []byte
-    payloadBytes, err = json.Marshal(payload) 
-    if err != nil {
-        http.Error(w, "Erro ao serializar payload para a API Gemini: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    var geminiResp *http.Response
-    geminiResp, err = http.Post(apiUrl, "application/json", strings.NewReader(string(payloadBytes))) 
-    if err != nil {
-        log.Printf("Erro ao chamar a API Gemini: %v", err)
-        http.Error(w, "Erro ao se comunicar com o serviço de IA.", http.StatusInternalServerError)
-        return
-    }
-    defer geminiResp.Body.Close()
-
-    var geminiResult map[string]interface{}
-    err = json.NewDecoder(geminiResp.Body).Decode(&geminiResult) 
-    if err != nil {
-        log.Printf("Erro ao decodificar resposta da API Gemini: %v", err)
-        http.Error(w, "Erro ao processar resposta do serviço de IA.", http.StatusInternalServerError)
-        return
-    }
-
-    var llmResponseText string
-    if candidates, ok := geminiResult["candidates"].([]interface{}); ok && len(candidates) > 0 {
-        if candidate, ok := candidates[0].(map[string]interface{}); ok {
-            if content, ok := candidate["content"].(map[string]interface{}); ok {
-                if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
-                    if part, ok := parts[0].(map[string]interface{}); ok {
-                        if text, ok := part["text"].(string); ok {
-                            llmResponseText = text
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if llmResponseText == "" {
-        log.Println("Resposta vazia ou inválida da API Gemini.")
-        http.Error(w, "Não foi possível obter uma resposta útil do serviço de IA.", http.StatusInternalServerError)
-        return
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(LLMResponse{Response: llmResponseText})
-}
-
+// ADICIONADO: Função principal que gerencia o servidor e as rotas
 func main() {
 	db, err := conectar()
 	if err != nil {
-		log.Fatalf("Erro ao conectar ao banco: %v", err)
+		log.Fatal("Falha ao abrir conexao com banco:", err)
 	}
 	defer db.Close()
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/pacientes", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			listarPacientesAPI(w, r, db)
-		case http.MethodPost:
+	// Endpoints da API REST
+	mux.HandleFunc("/api/pacientes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
 			inserirPacienteHandler(w, r, db)
-		default:
+		} else if r.Method == http.MethodGet {
+			listarPacientesAPI(w, r, db)
+		} else {
 			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
 		}
 	})
 
-	mux.HandleFunc("/pacientes/", func(w http.ResponseWriter, r *http.Request) {
-		idStr := strings.TrimPrefix(r.URL.Path, "/pacientes/")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "ID inválido", http.StatusBadRequest)
-			return
-		}
-		listarPacientePorID(w, r, db, id)
-	})
+	// Servidor de arquivos estáticos (Carrega seus arquivos HTML, CSS e JS da pasta "Statics")
+	fileServer := http.FileServer(http.Dir("./Statics"))
+	mux.Handle("/", fileServer)
 
-	mux.HandleFunc("/pacientes/busca", func(w http.ResponseWriter, r *http.Request) {
-		buscarPacientePorCartaoSUS(w, r, db)
-	})
+	// Captura dinamicamente a porta definida pelo Render ou usa a 8080 localmente
+	portaServidor := os.Getenv("PORT")
+	if portaServidor == "" {
+		portaServidor = "8080"
+	}
 
-	mux.HandleFunc("/exame_citopatologico", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			inserirExameCitopatologicoAPI(w, r, db)
-		default:
-			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
-		}
-	})
+	handlerComCORS := corsMiddleware(mux)
 
-	mux.HandleFunc("/submit_ficha_citopatologica", func(w http.ResponseWriter, r *http.Request) {
-		submitFichaCitopatologicaHandler(w, r, db)
-	})
-	mux.HandleFunc("/submit_ficha_citopatologica/", func(w http.ResponseWriter, r *http.Request) {
-		submitFichaCitopatologicaHandler(w, r, db)
-	})
-
-	mux.HandleFunc("/checar-email", func(w http.ResponseWriter, r *http.Request) {
-		checarEmailEEnviarCodigoHandler(w, r, db)
-	})
-
-    mux.HandleFunc("/llm-email-help", llmEmailHelpHandler) 
-
-	mux.HandleFunc("/enviar-codigo", enviarCodigoHandler)
-	mux.HandleFunc("/verificar-codigo", verificarCodigoHandler)
-	mux.HandleFunc("/redefinir-senha", func(w http.ResponseWriter, r *http.Request) {
-		redefinirSenhaHandler(w, r, db)
-	})
-	mux.HandleFunc("/api/sac", handleSacForm)
-
-
-	handler := corsMiddleware(mux)
-
-	log.Println("Servidor rodando em http://localhost:3000")
-	log.Fatal(http.ListenAndServe(":3000", handler))
+	fmt.Printf("Servidor rodando na porta %s...\n", portaServidor)
+	log.Fatal(http.ListenAndServe(":"+portaServidor, handlerComCORS))
 }
