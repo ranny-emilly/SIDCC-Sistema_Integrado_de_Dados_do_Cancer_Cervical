@@ -9,7 +9,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func main() {
+func iniciarPorta() {
 	connStr := "host=localhost port=5432 user=postgres password=postgres dbname=ProjetoIntegrador sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
