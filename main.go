@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/lib/pq"
 )
 
 
@@ -230,7 +231,42 @@ func main() {
 
 	// Servidor de arquivos estáticos (Carrega seus arquivos HTML, CSS e JS da pasta "Statics")
 	fileServer := http.FileServer(http.Dir("./Statics"))
-	mux.Handle("/", fileServer)
+	
+	// Roteador customizado para servir arquivos HTML sem a extensão .html na URL,
+	// e também servir os arquivos estáticos normalmente.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Se for a raiz, serve o index.html
+		if path == "/" {
+			http.ServeFile(w, r, "./Statics/html/index.html")
+			return
+		}
+
+		// Se o caminho não tiver extensão (ex: /login, /cadastro, /sac)
+		if !strings.Contains(path, ".") {
+			// Tenta encontrar o arquivo correspondente na pasta html
+			htmlPath := "./Statics/html" + path + ".html"
+			if _, err := os.Stat(htmlPath); err == nil {
+				http.ServeFile(w, r, htmlPath)
+				return
+			}
+		}
+
+		// Se o caminho terminar com .html, redireciona para a versão sem .html ou serve diretamente da pasta html
+		if strings.HasSuffix(path, ".html") {
+			// Remove o prefixo / se houver e tenta servir de Statics/html/
+			cleanPath := strings.TrimPrefix(path, "/")
+			htmlPath := "./Statics/html/" + cleanPath
+			if _, err := os.Stat(htmlPath); err == nil {
+				http.ServeFile(w, r, htmlPath)
+				return
+			}
+		}
+
+		// Caso contrário, serve usando o fileServer padrão (para css, js, img, etc.)
+		fileServer.ServeHTTP(w, r)
+	})
 
 	// Captura dinamicamente a porta definida pelo Render ou usa a 8080 localmente
 	portaServidor := os.Getenv("PORT")
@@ -243,3 +279,4 @@ func main() {
 	fmt.Printf("Servidor rodando na porta %s...\n", portaServidor)
 	log.Fatal(http.ListenAndServe(":"+portaServidor, handlerComCORS))
 }
+
